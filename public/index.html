@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multiplayer Shooter Game</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+            background-color: #0f0f1a;
+            color: #fff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            height: 100vh;
+        }
+
+        #login-screen {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            width: 100%;
+        }
+
+        #login-form {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            background-color: #1a1a2e;
+            padding: 30px;
+            border-radius: 10px;
+            width: 300px;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.3);
+        }
+
+        #login-form h1 {
+            text-align: center;
+            color: #ff6b6b;
+            margin: 0;
+        }
+
+        input {
+            padding: 10px;
+            border-radius: 5px;
+            border: none;
+            background-color: #2a2a42;
+            color: #fff;
+            font-size: 16px;
+        }
+
+        button {
+            padding: 10px;
+            border-radius: 5px;
+            border: none;
+            background-color: #ff6b6b;
+            color: #fff;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+        button:hover {
+            background-color: #ff5252;
+        }
+
+        #game-container {
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            width: 100%;
+            height: 100%;
+        }
+
+        #game-info {
+            display: flex;
+            justify-content: space-between;
+            width: 800px;
+            padding: 10px;
+            margin-bottom: 10px;
+        }
+
+        #game-canvas {
+            background-color: #16213e;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.3);
+        }
+
+        #countdown {
+            position: absolute;
+            font-size: 48px;
+            color: #ff6b6b;
+            display: none;
+        }
+
+        #scoreboard {
+            position: absolute;
+            right: 20px;
+            top: 20px;
+            background-color: rgba(26, 26, 46, 0.7);
+            padding: 10px;
+            border-radius: 5px;
+            max-width: 200px;
+        }
+
+        #scoreboard h3 {
+            margin: 0 0 10px 0;
+            text-align: center;
+        }
+
+        .score-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+        }
+
+        .player-name {
+            max-width: 120px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .kill-count {
+            font-weight: bold;
+            color: #ff6b6b;
+        }
+
+        #respawn-message {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 24px;
+            color: #ff6b6b;
+            text-align: center;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="login-screen">
+        <div id="login-form">
+            <h1>Multiplayer Shooter</h1>
+            <input type="text" id="player-name" placeholder="Nhập tên người chơi" maxlength="15">
+            <button id="play-button">Vào game</button>
+        </div>
+    </div>
+
+    <div id="game-container">
+        <div id="game-info">
+            <div id="player-stats">
+                Người chơi: <span id="player-name-display"></span> | 
+                Điểm số: <span id="kill-count">0</span>
+            </div>
+            <div id="players-online">
+                Người chơi online: <span id="player-count">0</span>
+            </div>
+        </div>
+        <canvas id="game-canvas" width="800" height="600"></canvas>
+        <div id="countdown"></div>
+        <div id="respawn-message"></div>
+        <div id="scoreboard">
+            <h3>Bảng điểm</h3>
+            <div id="scores-list"></div>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        // Kết nối với server
+        const socket = io();
+        
+        // Các phần tử DOM
+        const loginScreen = document.getElementById('login-screen');
+        const gameContainer = document.getElementById('game-container');
+        const playerNameInput = document.getElementById('player-name');
+        const playButton = document.getElementById('play-button');
+        const playerNameDisplay = document.getElementById('player-name-display');
+        const playerCountDisplay = document.getElementById('player-count');
+        const killCountDisplay = document.getElementById('kill-count');
+        const canvas = document.getElementById('game-canvas');
+        const ctx = canvas.getContext('2d');
+        const countdownElement = document.getElementById('countdown');
+        const respawnMessage = document.getElementById('respawn-message');
+        const scoresList = document.getElementById('scores-list');
+        
+        // Các biến game
+        let playerName = '';
+        let playerId = '';
+        let players = {};
+        let bullets = [];
+        let isDead = false;
+        let respawnTime = 0;
+        let keys = {};
+        let mousePosition = { x: 0, y: 0 };
+        
+        // Thiết lập sự kiện cho nút play
+        playButton.addEventListener('click', startGame);
+        
+        // Thêm xử lý khi nhấn Enter trong input
+        playerNameInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                startGame();
+            }
+        });
+        
+        function startGame() {
+            playerName = playerNameInput.value.trim();
+            if (playerName.length < 1) {
+                playerName = 'Player' + Math.floor(Math.random() * 1000);
+            }
+            
+            socket.emit('player-join', playerName);
+            
+            loginScreen.style.display = 'none';
+            gameContainer.style.display = 'flex';
+            playerNameDisplay.textContent = playerName;
+            
+            // Thiết lập sự kiện nghe từ server
+            setupSocketListeners();
+            
+            // Thiết lập sự kiện điều khiển
+            setupControls();
+            
+            // Bắt đầu game loop
+            gameLoop();
+        }
+        
+        function setupSocketListeners() {
+            // Nhận ID và danh sách người chơi ban đầu
+            socket.on('game-state', (gameState) => {
+                playerId = gameState.playerId;
+                players = gameState.players;
+                bullets = gameState.bullets;
+                playerCountDisplay.textContent = Object.keys(players).length;
+                updateScoreboard();
+            });
+            
+            // Cập nhật vị trí người chơi
+            socket.on('update-players', (updatedPlayers) => {
+                players = updatedPlayers;
+                playerCountDisplay.textContent = Object.keys(players).length;
+                updateScoreboard();
+            });
+            
+            // Cập nhật vị trí đạn
+            socket.on('update-bullets', (updatedBullets) => {
+                bullets = updatedBullets;
+            });
+            
+            // Xử lý khi người chơi chết
+            socket.on('player-died', (data) => {
+                if (data.playerId === playerId) {
+                    isDead = true;
+                    respawnTime = 10;
+                    showRespawnMessage();
+                    
+                    // Bắt đầu đếm ngược
+                    const respawnTimer = setInterval(() => {
+                        respawnTime--;
+                        showRespawnMessage();
+                        
+                        if (respawnTime <= 0) {
+                            clearInterval(respawnTimer);
+                            isDead = false;
+                            respawnMessage.style.display = 'none';
+                            socket.emit('player-respawn');
+                        }
+                    }, 1000);
+                }
+                
+                // Cập nhật điểm số
+                if (data.killerId === playerId) {
+                    killCountDisplay.textContent = players[playerId].kills;
+                }
+            });
+        }
+        
+        function setupControls() {
+            // Theo dõi các phím được nhấn
+            window.addEventListener('keydown', (e) => {
+                keys[e.key] = true;
+            });
+            
+            window.addEventListener('keyup', (e) => {
+                keys[e.key] = false;
+            });
+            
+            // Theo dõi vị trí chuột
+            canvas.addEventListener('mousemove', (e) => {
+                const rect = canvas.getBoundingClientRect();
+                mousePosition = {
+                    x: e.clientX - rect.left,
+                    y: e.clientY - rect.top
+                };
+                
+                if (!isDead && playerId) {
+                    // Gửi hướng nhìn cho server
+                    const player = players[playerId];
+                    if (player) {
+                        const direction = calculateDirection(player.x, player.y, mousePosition.x, mousePosition.y);
+                        socket.emit('player-rotate', direction);
+                    }
+                }
+            });
+            
+            // Xử lý bắn đạn
+            canvas.addEventListener('click', () => {
+                if (!isDead && playerId) {
+                    socket.emit('player-shoot');
+                }
+            });
+        }
+        
+        function calculateDirection(playerX, playerY, targetX, targetY) {
+            return Math.atan2(targetY - playerY, targetX - playerX);
+        }
+        
+        function showRespawnMessage() {
+            respawnMessage.style.display = 'block';
+            respawnMessage.textContent = `Bạn đã bị tiêu diệt!\nHồi sinh sau ${respawnTime} giây`;
+        }
+        
+        function updateScoreboard() {
+            scoresList.innerHTML = '';
+            
+            // Sắp xếp người chơi theo điểm số
+            const sortedPlayers = Object.entries(players)
+                .sort(([, a], [, b]) => b.kills - a.kills)
+                .slice(0, 10); // Hiển thị top 10
+                
+            sortedPlayers.forEach(([id, player]) => {
+                const scoreItem = document.createElement('div');
+                scoreItem.className = 'score-item';
+                
+                const nameSpan = document.createElement('span');
+                nameSpan.className = 'player-name';
+                nameSpan.textContent = player.name;
+                
+                const killSpan = document.createElement('span');
+                killSpan.className = 'kill-count';
+                killSpan.textContent = player.kills;
+                
+                scoreItem.appendChild(nameSpan);
+                scoreItem.appendChild(killSpan);
+                scoresList.appendChild(scoreItem);
+                
+                // Làm nổi bật người chơi hiện tại
+                if (id === playerId) {
+                    scoreItem.style.color = '#ff6b6b';
+                }
+            });
+        }
+        
+        function handleMovement() {
+            if (isDead || !playerId) return;
+            
+            let dirX = 0;
+            let dirY = 0;
+            
+            if (keys['w'] || keys['ArrowUp']) {
+                dirY = -1;
+            }
+            if (keys['s'] || keys['ArrowDown']) {
+                dirY = 1;
+            }
+            if (keys['a'] || keys['ArrowLeft']) {
+                dirX = -1;
+            }
+            if (keys['d'] || keys['ArrowRight']) {
+                dirX = 1;
+            }
+            
+            if (dirX !== 0 || dirY !== 0) {
+                socket.emit('player-move', { dirX, dirY });
+            }
+        }
+        
+        function drawPlayer(player) {
+            ctx.beginPath();
+            ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2);
+            ctx.fillStyle = player.id === playerId ? '#ff6b6b' : '#4cc9f0';
+            ctx.fill();
+            ctx.closePath();
+            
+            // Vẽ hướng nhìn
+            ctx.beginPath();
+            ctx.moveTo(player.x, player.y);
+            ctx.lineTo(
+                player.x + Math.cos(player.direction) * (player.radius + 10),
+                player.y + Math.sin(player.direction) * (player.radius + 10)
+            );
+            ctx.strokeStyle = player.id === playerId ? '#ff6b6b' : '#4cc9f0';
+            ctx.lineWidth = 3;
+            ctx.stroke();
+            ctx.closePath();
+            
+            // Vẽ tên người chơi
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '12px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText(player.name, player.x, player.y - player.radius - 10);
+        }
+        
+        function drawBullet(bullet) {
+            ctx.beginPath();
+            ctx.arc(bullet.x, bullet.y, bullet.radius, 0, Math.PI * 2);
+            ctx.fillStyle = bullet.playerId === playerId ? '#ff9e6b' : '#6bffc8';
+            ctx.fill();
+            ctx.closePath();
+        }
+        
+        function render() {
+            // Xóa canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Vẽ các người chơi
+            Object.values(players).forEach(player => {
+                drawPlayer(player);
+            });
+            
+            // Vẽ các viên đạn
+            bullets.forEach(bullet => {
+                drawBullet(bullet);
+            });
+        }
+        
+        function gameLoop() {
+            handleMovement();
+            render();
+            requestAnimationFrame(gameLoop);
+        }
+    </script>
+</body>
+</html>
